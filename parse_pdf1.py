@@ -22,22 +22,39 @@ collection = db['summary&keywords']
 logging.basicConfig(filename="pdf_processing.log", level=logging.ERROR)
 
 def fetch_pdf(url):
-    """Fetches PDF from the provided URL and returns the PDF content."""
+    """
+    Fetches the PDF content from the provided URL.
+    
+    Args:
+        url (str): The URL of the PDF to fetch.
+        
+    Returns:
+        BytesIO: The PDF content in binary format, or None if the fetch fails.
+    """
     try:
         response = requests.get(url)
-        response.raise_for_status()  # Raise an exception for 4xx or 5xx status codes
+        response.raise_for_status()  # Raise an exception for HTTP errors (4xx, 5xx status codes)
         return BytesIO(response.content)
     except requests.exceptions.RequestException as e:
         logging.error(f"Failed to fetch PDF from {url}: {e}")
         return None
 
 def parse_pdf(pdf_file):
-    """Parses the PDF file and returns the text content and number of pages."""
+    """
+    Parses the PDF file to extract text and determine the number of pages.
+    
+    Args:
+        pdf_file (BytesIO): The PDF file content in binary format.
+        
+    Returns:
+        tuple: A tuple containing the extracted text and the number of pages in the PDF.
+    """
     try:
         reader = PyPDF2.PdfReader(pdf_file)
         text_content = ""
         num_pages = len(reader.pages)
         
+        # Extract text from each page
         for page in reader.pages:
             text_content += page.extract_text() + "\n"
         
@@ -47,9 +64,19 @@ def parse_pdf(pdf_file):
         return None, 0
 
 def summarize_text(text, num_pages):
-    """Summarizes text based on the number of pages (short, medium, long PDFs)."""
+    """
+    Summarizes the text based on the number of pages (short, medium, long PDFs).
+    
+    Args:
+        text (str): The extracted text from the PDF.
+        num_pages (int): The number of pages in the PDF.
+        
+    Returns:
+        str: A summary of the text based on the length of the PDF.
+    """
     sentences = text.split('.')
     
+    # Adjust summary length based on document length (number of pages)
     if num_pages <= 10:  # Short PDFs (1-10 pages)
         num_sentences = 2
     elif num_pages <= 30:  # Medium PDFs (10-30 pages)
@@ -61,13 +88,24 @@ def summarize_text(text, num_pages):
     return summary
 
 def extract_keywords(text, num_pages):
-    """Extracts keywords using frequency analysis, adjusted for document length based on number of pages."""
+    """
+    Extracts keywords using frequency analysis, adjusted for document length based on the number of pages.
+    
+    Args:
+        text (str): The extracted text from the PDF.
+        num_pages (int): The number of pages in the PDF.
+        
+    Returns:
+        list: A list of extracted keywords based on the document length.
+    """
     stop_words = set(stopwords.words('english'))
     words = word_tokenize(text)
+    
+    # Filter out stop words and non-alphanumeric characters
     filtered_words = [word.lower() for word in words if word.isalnum() and word.lower() not in stop_words]
     word_freq = Counter(filtered_words)
     
-    # Adjust number of keywords based on document length
+    # Adjust the number of keywords based on document length
     if num_pages <= 10:  # Short PDFs
         num_keywords = 3
     elif num_pages <= 30:  # Medium PDFs
@@ -75,19 +113,29 @@ def extract_keywords(text, num_pages):
     else:  # Long PDFs
         num_keywords = 7
     
+    # Return the most common keywords
     keywords = [word for word, freq in word_freq.most_common(num_keywords)]
     return keywords
 
 def process_pdf(url):
-    """Processes a single PDF, generating summary and keywords, and storing in MongoDB."""
+    """
+    Processes a single PDF by fetching, parsing, summarizing, extracting keywords, and storing the results in MongoDB.
+    
+    Args:
+        url (str): The URL of the PDF to process.
+        
+    Returns:
+        bool: True if the processing was successful, False otherwise.
+    """
     pdf_file = fetch_pdf(url)
     if pdf_file:
         text, num_pages = parse_pdf(pdf_file)
         if text:
+            # Generate summary and keywords
             summary = summarize_text(text, num_pages)
             keywords = extract_keywords(text, num_pages)
             
-            # Store in MongoDB
+            # Store the results in MongoDB
             document = {
                 'pdf_url': url,
                 'summary': summary,
@@ -101,11 +149,18 @@ def process_pdf(url):
     return False
 
 def ingest_and_parse_pdfs(urls):
-    """Ingests and parses PDF files from a list of URLs and stores data in MongoDB concurrently."""
+    """
+    Ingests and processes a list of PDF URLs concurrently, extracting text, summarizing, and storing in MongoDB.
+    
+    Args:
+        urls (list): A list of URLs of PDFs to process.
+    """
     with ThreadPoolExecutor(max_workers=5) as executor:
+        # Submit each PDF URL for processing using multithreading
         futures = [executor.submit(process_pdf, url) for url in urls]
         for future in as_completed(futures):
             try:
+                # Handle any exceptions that occur during processing
                 future.result()
             except Exception as e:
                 logging.error(f"Error during PDF processing: {e}")
@@ -120,7 +175,7 @@ pdf_urls = list(dataset_json.values())
 # Start performance tracking
 start_time = time.time()
 
-# Process PDFs concurrently
+# Process the PDFs concurrently
 ingest_and_parse_pdfs(pdf_urls)
 
 # End performance tracking
